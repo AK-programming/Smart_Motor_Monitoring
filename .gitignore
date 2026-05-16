@@ -1,0 +1,7 @@
+.venv/
+vibration_project/python_server/.venv/
+__pycache__/
+*.py[cod]
+.env
+.DS_Store
+.vscode/
