@@ -69,7 +69,10 @@ def extract_features(accel_x, accel_y, accel_z, sample_rate=200):
         # Time domain
         features[f'rms_{axis_name}'] = float(np.sqrt(np.mean(axis_data**2)))
         features[f'peak_{axis_name}'] = float(np.max(np.abs(axis_data)))
-        features[f'kurtosis_{axis_name}'] = float(pd.Series(axis_data).kurtosis())
+        kurtosis_val = float(pd.Series(axis_data).kurtosis())
+        if not np.isfinite(kurtosis_val):
+            kurtosis_val = 0.0
+        features[f'kurtosis_{axis_name}'] = kurtosis_val
 
         # FFT
         fft_vals = rfft(axis_data)
@@ -103,17 +106,21 @@ def index():
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"}), 200
+    return jsonify({
+        "status": "ok",
+        "model_loaded": model is not None,
+        "model_type": type(model).__name__ if model is not None else None,
+    }), 200
 
 
 @app.route('/predict', methods=['POST'])
 def predict():
 
     try:
-        data = request.get_json()
+        data = request.get_json(force=True, silent=True)
 
         if not data:
-            return jsonify({'error': 'No data received'}), 400
+            return jsonify({'error': 'No JSON data received'}), 400
 
         accel_x = np.array(data.get('accel_x', []), dtype=float)
         accel_y = np.array(data.get('accel_y', []), dtype=float)
@@ -133,7 +140,8 @@ def predict():
 
         # Maintain training feature order
         feature_df = pd.DataFrame([features])
-        feature_df = feature_df.reindex(columns=model.feature_names_in_)
+        feature_df = feature_df.reindex(columns=model.feature_names_in_, fill_value=0.0)
+        feature_df = feature_df.replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
         # Predict
         prediction = model.predict(feature_df)[0]

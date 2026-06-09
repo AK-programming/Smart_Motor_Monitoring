@@ -11,7 +11,21 @@ Flask + Socket.IO server for ESP32 vibration data and real-time fault classifica
 | `/history` | GET | Last 50 predictions |
 | `/health` | GET | Health check (use for Koyeb/Render) |
 
-## Deploy on Koyeb (recommended)
+## Hugging Face Spaces (current ESP32 setup)
+
+| Use | URL |
+|-----|-----|
+| Dashboard | https://afnan2155-motor-health-monitor.hf.space/ |
+| ESP32 API | https://afnan2155-motor-health-monitor.hf.space/predict |
+| Health | https://afnan2155-motor-health-monitor.hf.space/health |
+
+The ESP32 sketch calls `/health` first to wake the Space, then posts to `/predict` with retries on 500/502/503.
+
+**Keep Space awake:** use [cron-job.org](https://cron-job.org) to ping `/health` every 5 minutes (free, no card).
+
+**After updating `app.py`:** push changes to your Hugging Face Space so server fixes take effect.
+
+## Deploy on Koyeb (requires credit card)
 
 Koyeb is more reliable than Hugging Face Spaces for this project: no cold-start sleep, consistent predictions, and HTTPS for the ESP32.
 

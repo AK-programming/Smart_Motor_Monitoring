@@ -1,6 +1,6 @@
 /*
  * ESP32-S3 Vibration Monitoring System - WiFi Version
- * Collects vibration data from MPU6050 and sends to cloud server.
+ * Collects vibration data from MPU6050 and sends to Hugging Face server.
  *
  * Hardware: ESP32-S3 Dev Module + MPU6050
  */
@@ -14,9 +14,16 @@
 const char* WIFI_SSID     = "IOT";
 const char* WIFI_PASSWORD = "12345678";
 
-// Replace with your Koyeb URL after deployment, e.g.:
-// https://your-app-name-your-org.koyeb.app/predict
-const char* SERVER_URL = "https://YOUR-APP.koyeb.app/predict";
+// Hugging Face Space (no trailing slash)
+const char* SERVER_BASE   = "https://afnan2155-motor-health-monitor.hf.space";
+const char* HEALTH_PATH   = "/health";
+const char* PREDICT_PATH  = "/predict";
+
+// Hugging Face cold starts can take 60-90s when the Space was sleeping
+const int HTTP_TIMEOUT_MS     = 90000;
+const int WAKE_MAX_ATTEMPTS   = 6;
+const int WAKE_RETRY_DELAY_MS = 10000;
+const int POST_MAX_RETRIES    = 3;
 
 // ============ SENSOR SETTINGS ============
 MPU6050 mpu(Wire);
@@ -29,6 +36,14 @@ float accel_z[WINDOW_SIZE];
 int sample_count = 0;
 
 const int LED_PIN = 2;
+
+String buildUrl(const char* path) {
+  return String(SERVER_BASE) + String(path);
+}
+
+bool isRetryableHttpCode(int code) {
+  return code < 0 || code == 500 || code == 502 || code == 503 || code == 504;
+}
 
 void connectWiFi() {
   Serial.println("\n[WiFi] Connecting...");
@@ -59,12 +74,98 @@ void connectWiFi() {
   }
 }
 
+bool wakeServer() {
+  String healthUrl = buildUrl(HEALTH_PATH);
+  Serial.println("[Wake] Checking Hugging Face Space...");
+
+  for (int attempt = 1; attempt <= WAKE_MAX_ATTEMPTS; attempt++) {
+    HTTPClient http;
+    http.begin(healthUrl);
+    http.setTimeout(HTTP_TIMEOUT_MS);
+    http.addHeader("Connection", "close");
+
+    Serial.printf("[Wake] GET %s (try %d/%d)\n", healthUrl.c_str(), attempt, WAKE_MAX_ATTEMPTS);
+    int httpCode = http.GET();
+
+    if (httpCode == 200) {
+      Serial.printf("[Wake] Space is ready: %s\n", http.getString().c_str());
+      http.end();
+      return true;
+    }
+
+    Serial.printf("[Wake] HTTP %d", httpCode);
+    if (httpCode > 0) {
+      Serial.printf(" | %s", http.getString().c_str());
+    }
+    Serial.println();
+
+    http.end();
+
+    if (attempt < WAKE_MAX_ATTEMPTS) {
+      Serial.printf("[Wake] Waiting %d s before retry...\n", WAKE_RETRY_DELAY_MS / 1000);
+      delay(WAKE_RETRY_DELAY_MS);
+    }
+  }
+
+  Serial.println("[Wake] Space did not become ready.");
+  return false;
+}
+
+bool sendPost(const char* path, const String& payload, const char* label) {
+  String url = buildUrl(path);
+
+  for (int attempt = 1; attempt <= POST_MAX_RETRIES; attempt++) {
+    if (!wakeServer()) {
+      Serial.printf("[%s] Skipping POST — server not awake (try %d/%d)\n",
+                    label, attempt, POST_MAX_RETRIES);
+      if (attempt < POST_MAX_RETRIES) {
+        delay(WAKE_RETRY_DELAY_MS);
+        continue;
+      }
+      return false;
+    }
+
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Connection", "close");
+    http.setTimeout(HTTP_TIMEOUT_MS);
+
+    Serial.printf("[%s] POST -> %s (try %d/%d)\n", label, url.c_str(), attempt, POST_MAX_RETRIES);
+    int httpCode = http.POST(payload);
+
+    if (httpCode == 200) {
+      String response = http.getString();
+      Serial.printf("[%s] 200 OK | Response: %s\n", label, response.c_str());
+      http.end();
+      return true;
+    }
+
+    Serial.printf("[%s] HTTP %d", label, httpCode);
+    if (httpCode > 0) {
+      Serial.printf(" | Body: %s", http.getString().c_str());
+    }
+    Serial.println();
+    http.end();
+
+    if (!isRetryableHttpCode(httpCode) || attempt == POST_MAX_RETRIES) {
+      return false;
+    }
+
+    Serial.printf("[%s] Retrying in %d s...\n", label, WAKE_RETRY_DELAY_MS / 1000);
+    delay(WAKE_RETRY_DELAY_MS);
+  }
+
+  return false;
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
 
   Serial.println("\n=================================");
-  Serial.println(" ESP32-S3 Vibration Monitor v2.0");
+  Serial.println(" ESP32-S3 Vibration Monitor v2.1");
+  Serial.println(" Hugging Face Cloud Edition");
   Serial.println("=================================");
 
   Serial.println("\n[Sensor] Initializing MPU6050...");
@@ -75,6 +176,10 @@ void setup() {
   Serial.println("[Sensor] MPU6050 ready!");
 
   connectWiFi();
+
+  Serial.println("\n[System] Waking Hugging Face Space before monitoring...");
+  wakeServer();
+
   Serial.println("\n[System] Ready. Starting monitoring...\n");
   delay(500);
 }
@@ -123,13 +228,13 @@ void loop() {
 
     Serial.printf("[Send] Payload size: %d bytes\n", payload.length());
 
-    bool serverOK = sendPost(SERVER_URL, payload, "PredictionServer");
+    bool serverOK = sendPost(PREDICT_PATH, payload, "HuggingFace");
 
     if (serverOK) {
-      Serial.println("[Status] Server received data.\n");
+      Serial.println("[Status] Prediction received.\n");
       digitalWrite(LED_PIN, HIGH);
     } else {
-      Serial.println("[Status] Server request failed.");
+      Serial.println("[Status] Prediction failed — Space may still be waking up.");
       for (int i = 0; i < 3; i++) {
         digitalWrite(LED_PIN, LOW);  delay(150);
         digitalWrite(LED_PIN, HIGH); delay(150);
@@ -137,31 +242,6 @@ void loop() {
     }
 
     sample_count = 0;
-    delay(1000);
+    delay(2000);
   }
-}
-
-bool sendPost(const char* url, const String& payload, const char* label) {
-  HTTPClient http;
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Connection", "keep-alive");
-  http.setTimeout(30000);
-
-  Serial.printf("[%s] POST -> %s\n", label, url);
-  int httpCode = http.POST(payload);
-
-  if (httpCode == 200) {
-    String response = http.getString();
-    Serial.printf("[%s] 200 OK | Response: %s\n", label, response.c_str());
-    http.end();
-    return true;
-  }
-
-  Serial.printf("[%s] HTTP %d\n", label, httpCode);
-  if (httpCode > 0) {
-    Serial.printf("[%s] Body: %s\n", label, http.getString().c_str());
-  }
-  http.end();
-  return false;
 }
