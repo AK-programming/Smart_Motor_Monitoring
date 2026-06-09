@@ -1,3 +1,14 @@
+---
+title: Smart Motor Health Monitor
+emoji: ⚙️
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+---
+
 # Smart Motor Health Monitor — Server
 
 Flask + Socket.IO server for ESP32 vibration data and real-time fault classification.
