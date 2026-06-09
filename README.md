@@ -11,7 +11,7 @@ This project monitors motor vibration using an ESP32-S3 and an MPU6050 sensor, s
 
 ## Project Structure (Key Files)
 
-- `vibration_project/python_server/server.py` - Flask + Socket.IO server.
+- `vibration_project/python_server/app.py` - Flask + Socket.IO server.
 - `vibration_project/python_server/requirements.txt` - Python dependencies.
 - `vibration_project/python_server/motor_fault_model.pkl` - Trained ML model used by the server.
 - `vibration_project/python_server/templates/dashboard.html` - Web dashboard UI.
@@ -40,7 +40,7 @@ pip install -r requirements.txt
 4. Start the server.
 
 ```powershell
-python server.py
+python app.py
 ```
 
 5. Open the dashboard in your browser.
@@ -56,6 +56,19 @@ The server listens on `0.0.0.0:5000`, so other devices on the same network can r
 - `GET /` serves the dashboard UI.
 - `POST /predict` expects JSON with exactly 512 samples per axis.
 - `GET /history` returns the last 50 predictions held in memory.
+- `GET /health` returns server status (for cloud health checks).
+
+## Deploy to Cloud (Koyeb / Render)
+
+Hugging Face Spaces often sleep when idle, which causes timeouts and inconsistent predictions from the ESP32. For a more stable setup, deploy the server to **Koyeb** (recommended) or **Render**.
+
+See step-by-step instructions in `vibration_project/python_server/README.md`.
+
+After deployment, set the ESP32 `SERVER_URL` to your cloud HTTPS URL:
+
+```cpp
+const char* SERVER_URL = "https://your-app.koyeb.app/predict";
+```
 
 Example payload shape for `POST /predict`:
 

@@ -42,7 +42,7 @@ if not MODEL_PATH.is_file():
     raise FileNotFoundError(f"motor_fault_model.pkl not found at {MODEL_PATH}")
 
 model = joblib.load(MODEL_PATH)
-print("✓ Model loaded:", type(model).__name__)
+print("Model loaded:", type(model).__name__)
 
 prediction_history = []
 MAX_HISTORY = 50
@@ -126,7 +126,7 @@ def predict():
         if np.allclose(accel_x, accel_x[0]) or np.allclose(accel_y, accel_y[0]) or np.allclose(accel_z, accel_z[0]):
             return jsonify({'error': 'Invalid sensor data: no variation detected'}), 400
 
-        print("\n📊 Data Received:", datetime.now().strftime('%H:%M:%S'))
+        print("\nData Received:", datetime.now().strftime('%H:%M:%S'))
 
         # Extract Features
         features = extract_features(accel_x, accel_y, accel_z)
@@ -160,12 +160,12 @@ def predict():
 
         socketio.emit('prediction', result)
 
-        print(f"🎯 Prediction: {prediction} ({confidence*100:.1f}%)")
+        print(f"Prediction: {prediction} ({confidence*100:.1f}%)")
 
         return jsonify(result), 200
 
     except Exception as e:
-        print("\n❌ ERROR:", str(e))
+        print("\nERROR:", str(e))
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
@@ -177,21 +177,23 @@ def get_history():
 
 @socketio.on('connect')
 def handle_connect():
-    print("✓ Dashboard Connected:", request.sid)
+    print("Dashboard Connected:", request.sid)
     emit('history', prediction_history)
 
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    print("✗ Dashboard Disconnected:", request.sid)
+    print("Dashboard Disconnected:", request.sid)
 
 
 # -----------------------------
 # Run Server
 # -----------------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    print("\n🚀 Starting Server...")
+    # Hugging Face Spaces use port 7860; local default is 5000
+    default_port = 7860 if os.environ.get("SPACE_ID") else 5000
+    port = int(os.environ.get("PORT", default_port))
+    print("\nStarting Server...")
     print(f"Dashboard: http://localhost:{port}\n")
 
     socketio.run(app, host="0.0.0.0", port=port, debug=False)
